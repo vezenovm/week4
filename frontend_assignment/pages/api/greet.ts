@@ -1,6 +1,7 @@
 import Greeter from "artifacts/contracts/Greeters.sol/Greeters.json"
 import { Contract, providers, utils } from "ethers"
 import type { NextApiRequest, NextApiResponse } from "next"
+import { resolve } from "path/posix"
 
 // This API can represent a backend.
 // The contract owner is the only account that can call the `greet` function,
@@ -9,17 +10,32 @@ import type { NextApiRequest, NextApiResponse } from "next"
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
     const { greeting, nullifierHash, solidityProof } = JSON.parse(req.body)
 
+    console.log("greeting: " + greeting, "nullifierHash: " + nullifierHash, "solidityProof: " + solidityProof)
     const contract = new Contract("0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512", Greeter.abi)
-    const provider = new providers.JsonRpcProvider("http://localhost:8545")
+
+    // Must use 127.0.0.1 as was getting an error when specifying the address with 'localhost' in the url.
+    // This is because on MacOS localhost resolves to IPv6 address ::1 rather than 127.0.0.1 and the hardhot node RPC is bound on IPv4
+    const provider = new providers.JsonRpcProvider("http://127.0.0.1:8545")
 
     const contractOwner = contract.connect(provider.getSigner())
 
     try {
-        await contractOwner.greet(utils.formatBytes32String(greeting), nullifierHash, solidityProof)
-
-        res.status(200).end()
+        let greetingRes = ''
+        const tx = await contractOwner.greet(
+            utils.formatBytes32String(greeting),
+            nullifierHash,
+            solidityProof
+          );
+        const receipt = await tx.wait();
+        if (receipt.events.length > 0) {
+            const greetingHex = receipt.events[0].args[0];
+            greetingRes = utils.parseBytes32String(greetingHex)
+        }
+        res.status(200).json({ greeting: greetingRes})
     } catch (error: any) {
-        const { message } = JSON.parse(error.body).error
+        // Must use stringify rather than JSON.parse()
+        const message  = JSON.stringify(error, null, 2)
+        console.log("error message: " + message)
         const reason = message.substring(message.indexOf("'") + 1, message.lastIndexOf("'"))
 
         res.status(500).send(reason || "Unknown error!")
